@@ -1,0 +1,12 @@
+{
+  "appId": "com.cinque.cropdisease",
+  "appName": "Cinque",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  }
+}
