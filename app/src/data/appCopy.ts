@@ -1,8 +1,0 @@
-export const APP_TITLE = 'Cinque'
-export const APP_SUBTITLE = 'Crop Disease Detection'
-export const CTA_CAMERA = 'Click Picture'
-export const CTA_GALLERY = 'Upload From Gallery'
-export const CTA_DETECT = 'Detect disease?'
-export const CTA_YES = 'Yes'
-export const CTA_CANCEL = 'Cancel'
-export const CTA_TRY_ANOTHER = 'Try Another Image'

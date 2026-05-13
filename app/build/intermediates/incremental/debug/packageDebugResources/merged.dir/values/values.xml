@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#1B8C3E</color>
+    <string name="app_name">CropDoctor</string>
+    <string name="cancel">Cancel</string>
+    <string name="click_picture">Click Picture</string>
+    <string name="confidence">Confidence</string>
+    <string name="detect_disease">Detect Disease?</string>
+    <string name="loading">Analyzing crop...</string>
+    <string name="subtitle">Crop Disease Detection</string>
+    <string name="try_another">Try Another Image</string>
+    <string name="upload_gallery">Upload from Gallery</string>
+    <string name="yes">Yes, Detect</string>
+    <style name="Theme.CropDoctor" parent="android:Theme.Material.Light.NoActionBar"/>
+</resources>
