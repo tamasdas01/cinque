@@ -1,11 +1,9 @@
-/*
- * Loads Model_V5.tflite from assets, preprocesses a Bitmap,
- * runs inference, and returns a ranked InferenceResult.
- */
 package com.cropdoctor.app.model
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.util.Log
 import com.cropdoctor.app.data.ClassNameRepository
 import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
@@ -13,98 +11,235 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
+import kotlin.math.min
 
 class TFLiteInferenceHelper(
     private val context: Context,
     private val repository: ClassNameRepository
 ) {
 
-    // TFLite model input image size (must match model training config)
-    private val imageSize = 224
-    // Number of channels: RGB
-    private val channels = 3
-    // Bytes per float
-    private val bytesPerFloat = 4
+    companion object {
+        private const val TAG = "TFLiteHelper"
+
+        // MUST MATCH TRAINING
+        private const val IMAGE_SIZE = 384
+
+        private const val CHANNELS = 3
+        private const val BYTES_PER_FLOAT = 4
+
+        // Confidence threshold
+        private const val MIN_CONFIDENCE = 0.60f
+
+        // Top predictions to keep
+        private const val TOP_K = 3
+    }
 
     private var interpreter: Interpreter? = null
 
-    /**
-     * Loads the TFLite model from assets into a MappedByteBuffer.
-     * Call this once before running inference.
-     */
+    // =====================================================
+    // LOAD MODEL
+    // =====================================================
+
     fun loadModel() {
+
         val options = Interpreter.Options().apply {
+
             numThreads = 4
+
+            // Optional:
+            // setUseNNAPI(true)
+
+            // Optional GPU delegate later
         }
-        interpreter = Interpreter(loadModelFile(), options)
+
+        interpreter = Interpreter(
+            loadModelFile(),
+            options
+        )
+
+        Log.d(TAG, "Model loaded successfully")
     }
+
+    // =====================================================
+    // LOAD MODEL FILE
+    // =====================================================
 
     private fun loadModelFile(): MappedByteBuffer {
-        val assetFileDescriptor = context.assets.openFd("Model_V5.tflite")
-        val fileInputStream = FileInputStream(assetFileDescriptor.fileDescriptor)
-        val fileChannel = fileInputStream.channel
-        val startOffset = assetFileDescriptor.startOffset
-        val declaredLength = assetFileDescriptor.declaredLength
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+
+        val fileDescriptor =
+            context.assets.openFd("model_v6.tflite")
+
+        val inputStream =
+            FileInputStream(fileDescriptor.fileDescriptor)
+
+        val fileChannel = inputStream.channel
+
+        return fileChannel.map(
+            FileChannel.MapMode.READ_ONLY,
+            fileDescriptor.startOffset,
+            fileDescriptor.declaredLength
+        )
     }
 
-    /**
-     * Runs inference on a given Bitmap.
-     * @param bitmap The input image (will be resized internally)
-     * @return InferenceResult with top prediction and confidence
-     */
+    // =====================================================
+    // MAIN INFERENCE
+    // =====================================================
+
     fun classify(bitmap: Bitmap): InferenceResult {
+
         val interpreter = interpreter
-            ?: throw IllegalStateException("Model not loaded. Call loadModel() first.")
+            ?: throw IllegalStateException(
+                "Model not loaded."
+            )
 
-        // Resize bitmap to model input size
-        val resized = Bitmap.createScaledBitmap(bitmap, imageSize, imageSize, true)
+        val startTime = SystemClock.uptimeMillis()
 
-        // Prepare input ByteBuffer: shape [1, 224, 224, 3], normalized to [0,1]
+        // Resize
+        val resizedBitmap = Bitmap.createScaledBitmap(
+            bitmap,
+            IMAGE_SIZE,
+            IMAGE_SIZE,
+            true
+        )
+
+        // Input tensor
         val inputBuffer = ByteBuffer.allocateDirect(
-            1 * imageSize * imageSize * channels * bytesPerFloat
-        ).apply { order(ByteOrder.nativeOrder()) }
+            1 *
+                    IMAGE_SIZE *
+                    IMAGE_SIZE *
+                    CHANNELS *
+                    BYTES_PER_FLOAT
+        ).apply {
+            order(ByteOrder.nativeOrder())
+        }
 
-        for (y in 0 until imageSize) {
-            for (x in 0 until imageSize) {
-                val pixel = resized.getPixel(x, y)
-                // Normalize RGB to [0, 1]
-                inputBuffer.putFloat(((pixel shr 16) and 0xFF) / 255.0f)
-                inputBuffer.putFloat(((pixel shr 8) and 0xFF) / 255.0f)
-                inputBuffer.putFloat((pixel and 0xFF) / 255.0f)
+        // =================================================
+        // EFFICIENTNETV2 PREPROCESSING
+        // SAME AS:
+        // preprocess_input()
+        // =================================================
+
+        for (y in 0 until IMAGE_SIZE) {
+
+            for (x in 0 until IMAGE_SIZE) {
+
+                val pixel = resizedBitmap.getPixel(x, y)
+
+                val r = ((pixel shr 16) and 0xFF)
+                val g = ((pixel shr 8) and 0xFF)
+                val b = (pixel and 0xFF)
+
+                // Convert to [-1, 1]
+
+                inputBuffer.putFloat(
+                    (r / 127.5f) - 1f
+                )
+
+                inputBuffer.putFloat(
+                    (g / 127.5f) - 1f
+                )
+
+                inputBuffer.putFloat(
+                    (b / 127.5f) - 1f
+                )
             }
         }
 
-        // Output buffer: [1, NUM_CLASSES]
+        inputBuffer.rewind()
+
+        // =================================================
+        // OUTPUT BUFFER
+        // =================================================
+
         val numClasses = repository.classNames.size
-        if (numClasses <= 0) {
-            throw IllegalStateException("class_names.json is empty or missing.")
-        }
-        val outputBuffer = Array(1) { FloatArray(numClasses) }
+
+        val output =
+            Array(1) { FloatArray(numClasses) }
 
         // Run inference
-        inputBuffer.rewind()
-        interpreter.run(inputBuffer, outputBuffer)
+        interpreter.run(inputBuffer, output)
 
-        // Find top prediction
-        val probabilities = outputBuffer[0]
-        val maxIndex = probabilities.indices.maxByOrNull { probabilities[it] } ?: 0
-        val confidence = probabilities[maxIndex]
-        val rawLabel = repository.classNames.getOrElse(maxIndex) { "Unknown" }
-        val (crop, disease) = repository.formatLabel(rawLabel)
+        val probabilities = output[0]
+
+        // =================================================
+        // TOP-K PREDICTIONS
+        // =================================================
+
+        val topPredictions =
+            probabilities.indices
+                .sortedByDescending { probabilities[it] }
+                .take(min(TOP_K, probabilities.size))
+
+        val bestIndex = topPredictions.first()
+
+        val bestConfidence =
+            probabilities[bestIndex]
+
+        val rawLabel =
+            repository.classNames.getOrElse(bestIndex) {
+                "Unknown"
+            }
+
+        val (crop, disease) =
+            repository.formatLabel(rawLabel)
+
+        val inferenceTime =
+            SystemClock.uptimeMillis() - startTime
+
+        // =================================================
+        // DEBUG LOGGING
+        // =================================================
+
+        Log.d(TAG, "========== PREDICTIONS ==========")
+
+        topPredictions.forEachIndexed { rank, index ->
+
+            Log.d(
+                TAG,
+                "#${rank + 1} " +
+                        "${repository.classNames[index]} " +
+                        "- ${(probabilities[index] * 100f)}%"
+            )
+        }
+
+        Log.d(
+            TAG,
+            "Inference time: ${inferenceTime} ms"
+        )
+
+        // =================================================
+        // CONFIDENCE THRESHOLDING
+        // =================================================
+
+        val finalDisease =
+            if (bestConfidence < MIN_CONFIDENCE) {
+                "Uncertain Disease"
+            } else {
+                disease.ifEmpty { "Unknown" }
+            }
 
         return InferenceResult(
             rawLabel = rawLabel,
             cropName = crop,
-            diseaseName = if (disease.isEmpty()) "Unknown" else disease,
-            confidence = confidence,
-            isHealthy = rawLabel.contains("healthy", ignoreCase = true)
+            diseaseName = finalDisease,
+            confidence = bestConfidence,
+            isHealthy = rawLabel.contains(
+                "healthy",
+                ignoreCase = true
+            )
         )
     }
 
-    /** Release interpreter resources */
+    // =====================================================
+    // CLEANUP
+    // =====================================================
+
     fun close() {
+
         interpreter?.close()
+
         interpreter = null
+
+        Log.d(TAG, "Interpreter closed")
     }
 }

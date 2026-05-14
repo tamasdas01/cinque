@@ -2,6 +2,9 @@
  * Navigation host - wires all screens together using
  * Jetpack Navigation Compose.
  */
+
+// CropDoctorApp.kt
+
 package com.cropdoctor.app
 
 import androidx.compose.animation.fadeIn

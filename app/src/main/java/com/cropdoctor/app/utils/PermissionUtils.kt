@@ -1,6 +1,8 @@
 /*
  * Centralizes permission logic for Camera and Storage access.
  */
+
+// PermissionUtils.kt
 package com.cropdoctor.app.utils
 
 import android.os.Build

@@ -2,6 +2,8 @@
  * Entry point of the application.
  * Sets up Compose and applies the app theme.
  */
+
+// MainActivity.kt
 package com.cropdoctor.app
 
 import android.os.Bundle

@@ -1,6 +1,8 @@
 /*
  * Data class holding the result of a single TFLite inference pass.
  */
+
+// InferenceResult.kt
 package com.cropdoctor.app.model
 
 data class InferenceResult(

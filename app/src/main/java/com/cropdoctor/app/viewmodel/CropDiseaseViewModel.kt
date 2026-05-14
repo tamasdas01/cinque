@@ -2,6 +2,8 @@
  * ViewModel that manages state for the crop disease detection workflow.
  * Survives configuration changes and exposes StateFlow to Compose UI.
  */
+
+// CropDiseaseViewModel.kt
 package com.cropdoctor.app.viewmodel
 
 import android.app.Application
@@ -69,6 +71,9 @@ class CropDiseaseViewModel(application: Application) : AndroidViewModel(applicat
      * Called when user selects an image (from camera or gallery).
      * Loads and compresses the bitmap for preview.
      */
+
+    /**  // Old version without compression
+
     fun onImageSelected(uri: Uri) {
         viewModelScope.launch {
             val bitmap = withContext(Dispatchers.IO) {
@@ -84,6 +89,42 @@ class CropDiseaseViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
     }
+    */
+
+    // Updated version with compression to reduce memory usage and speed up inference
+    fun onImageSelected(uri: Uri) {
+
+    viewModelScope.launch {
+
+        val bitmap = withContext(Dispatchers.IO) {
+
+            BitmapUtils.uriToBitmap(
+                getApplication(),
+                uri
+            )
+        }
+
+        if (bitmap != null) {
+
+            _selectedBitmap.value = bitmap
+
+            _detectionState.value =
+                DetectionState.ModelReady
+
+        } else {
+
+            Log.e(
+                logTag,
+                "Bitmap decode failed for uri: $uri"
+            )
+
+            _detectionState.value =
+                DetectionState.Error(
+                    "Could not load image. Please try another."
+                )
+        }
+    }
+}
 
     /**
      * Runs TFLite inference on the currently selected bitmap.
