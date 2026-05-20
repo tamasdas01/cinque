@@ -4,13 +4,13 @@
             "outputFile": "com.cropdoctor.app-mergeDebugResources-52:/values-night-v8/values-night-v8.xml",
             "map": [
                 {
-                    "source": "D:\\projects app\\cinque\\app\\src\\main\\res\\values-night\\themes.xml",
+                    "source": "/home/souradippatra/Desktop/cinque/app/src/main/res/values-night/themes.xml",
                     "from": {
                         "startLines": "1",
                         "startColumns": "4",
-                        "startOffsets": "17",
+                        "startOffsets": "16",
                         "endColumns": "81",
-                        "endOffsets": "94"
+                        "endOffsets": "93"
                     },
                     "to": {
                         "startLines": "2",

@@ -1,3 +1,10 @@
+/*
+ * Bitmap utility functions
+ * for safe image loading,
+ * resizing,
+ * and EXIF rotation correction.
+ */
+
 package com.cropdoctor.app.utils
 
 import android.content.Context
@@ -5,15 +12,16 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.Log
 import androidx.exifinterface.media.ExifInterface
-import java.io.InputStream
-import kotlin.math.max
 
 object BitmapUtils {
 
+    private const val TAG = "BitmapUtils"
+
     // =====================================================
     // URI -> BITMAP
-    // MEMORY SAFE
+    // MEMORY SAFE DECODING
     // =====================================================
 
     fun uriToBitmap(
@@ -23,12 +31,14 @@ object BitmapUtils {
 
         return try {
 
-            // ---------------------------------------------
-            // READ IMAGE BOUNDS ONLY
-            // ---------------------------------------------
+            // -------------------------------------------------
+            // STEP 1
+            // READ IMAGE DIMENSIONS ONLY
+            // -------------------------------------------------
 
             val boundsOptions =
                 BitmapFactory.Options().apply {
+
                     inJustDecodeBounds = true
                 }
 
@@ -43,24 +53,47 @@ object BitmapUtils {
                     )
                 }
 
-            // ---------------------------------------------
-            // CALCULATE SAMPLE SIZE
-            // ---------------------------------------------
+            val originalWidth =
+                boundsOptions.outWidth
 
-            val maxDimension = 1024
+            val originalHeight =
+                boundsOptions.outHeight
+
+            Log.d(
+                TAG,
+                """
+                Original Image
+                Width  : $originalWidth
+                Height : $originalHeight
+                """.trimIndent()
+            )
+
+            // -------------------------------------------------
+            // STEP 2
+            // CALCULATE SAFE SAMPLE SIZE
+            // -------------------------------------------------
+
+            val maxDimension = 2048
 
             var sampleSize = 1
 
             while (
-                boundsOptions.outWidth / sampleSize > maxDimension ||
-                boundsOptions.outHeight / sampleSize > maxDimension
+                originalWidth / sampleSize > maxDimension ||
+                originalHeight / sampleSize > maxDimension
             ) {
+
                 sampleSize *= 2
             }
 
-            // ---------------------------------------------
-            // DECODE SCALED IMAGE
-            // ---------------------------------------------
+            Log.d(
+                TAG,
+                "Sample Size: $sampleSize"
+            )
+
+            // -------------------------------------------------
+            // STEP 3
+            // DECODE ACTUAL BITMAP
+            // -------------------------------------------------
 
             val decodeOptions =
                 BitmapFactory.Options().apply {
@@ -69,6 +102,8 @@ object BitmapUtils {
 
                     inPreferredConfig =
                         Bitmap.Config.ARGB_8888
+
+                    inMutable = false
                 }
 
             val bitmap =
@@ -82,34 +117,61 @@ object BitmapUtils {
                             decodeOptions
                         )
                     }
-                    ?: return null
 
-            // ---------------------------------------------
-            // FIX ROTATION
-            // ---------------------------------------------
+            if (bitmap == null) {
+
+                Log.e(
+                    TAG,
+                    "Bitmap decoding failed"
+                )
+
+                return null
+            }
+
+            // -------------------------------------------------
+            // STEP 4
+            // FIX EXIF ROTATION
+            // -------------------------------------------------
 
             val exif =
                 context.contentResolver
                     .openInputStream(uri)
-                    ?.use {
-                        ExifInterface(it)
+                    ?.use { stream ->
+
+                        ExifInterface(stream)
                     }
 
-            rotateBitmapIfRequired(
-                bitmap,
-                exif
+            val rotatedBitmap =
+                rotateBitmapIfRequired(
+                    bitmap,
+                    exif
+                )
+
+            Log.d(
+                TAG,
+                """
+                Final Bitmap
+                Width  : ${rotatedBitmap.width}
+                Height : ${rotatedBitmap.height}
+                """.trimIndent()
             )
+
+            rotatedBitmap
 
         } catch (e: Exception) {
 
-            e.printStackTrace()
+            Log.e(
+                TAG,
+                "Failed to decode bitmap",
+                e
+            )
 
             null
         }
     }
 
     // =====================================================
-    // ROTATION FIX
+    // FIX ROTATION USING EXIF
     // =====================================================
 
     private fun rotateBitmapIfRequired(
@@ -128,16 +190,25 @@ object BitmapUtils {
 
         when (orientation) {
 
-            ExifInterface.ORIENTATION_ROTATE_90 ->
+            ExifInterface.ORIENTATION_ROTATE_90 -> {
+
                 matrix.postRotate(90f)
+            }
 
-            ExifInterface.ORIENTATION_ROTATE_180 ->
+            ExifInterface.ORIENTATION_ROTATE_180 -> {
+
                 matrix.postRotate(180f)
+            }
 
-            ExifInterface.ORIENTATION_ROTATE_270 ->
+            ExifInterface.ORIENTATION_ROTATE_270 -> {
+
                 matrix.postRotate(270f)
+            }
 
-            else -> return bitmap
+            else -> {
+
+                return bitmap
+            }
         }
 
         return Bitmap.createBitmap(
@@ -152,7 +223,7 @@ object BitmapUtils {
     }
 
     // =====================================================
-    // FINAL MODEL RESIZE
+    // RESIZE FOR MODEL
     // =====================================================
 
     fun resizeForModel(

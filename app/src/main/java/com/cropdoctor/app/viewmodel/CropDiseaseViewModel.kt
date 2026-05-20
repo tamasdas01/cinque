@@ -1,9 +1,14 @@
 /*
- * ViewModel that manages state for the crop disease detection workflow.
- * Survives configuration changes and exposes StateFlow to Compose UI.
+ * ViewModel that manages:
+ * - model loading
+ * - image selection
+ * - inference
+ * - UI state
+ *
+ * Stable version aligned with:
+ * plant_disease_model_v7_clean.tflite
  */
 
-// CropDiseaseViewModel.kt
 package com.cropdoctor.app.viewmodel
 
 import android.app.Application
@@ -23,143 +28,297 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Sealed class for all possible UI states
+// =====================================================
+// UI STATES
+// =====================================================
+
 sealed class DetectionState {
+
     object Idle : DetectionState()
+
     object ModelLoading : DetectionState()
+
     object ModelReady : DetectionState()
+
     object Analyzing : DetectionState()
-    data class Success(val result: InferenceResult, val bitmap: Bitmap) : DetectionState()
-    data class Error(val message: String) : DetectionState()
+
+    data class Success(
+        val result: InferenceResult,
+        val bitmap: Bitmap
+    ) : DetectionState()
+
+    data class Error(
+        val message: String
+    ) : DetectionState()
 }
 
-class CropDiseaseViewModel(application: Application) : AndroidViewModel(application) {
+// =====================================================
+// VIEWMODEL
+// =====================================================
 
-    private val logTag = "CropDoctor"
+class CropDiseaseViewModel(
+    application: Application
+) : AndroidViewModel(application) {
 
-    private val repository = ClassNameRepository(application)
-    private val inferenceHelper = TFLiteInferenceHelper(application, repository)
+    companion object {
 
-    // Currently selected image bitmap for preview
-    private val _selectedBitmap = MutableStateFlow<Bitmap?>(null)
-    val selectedBitmap: StateFlow<Bitmap?> = _selectedBitmap.asStateFlow()
+        private const val TAG =
+            "CropDiseaseVM"
+    }
 
-    // Main detection state
-    private val _detectionState = MutableStateFlow<DetectionState>(DetectionState.ModelLoading)
-    val detectionState: StateFlow<DetectionState> = _detectionState.asStateFlow()
+    // =====================================================
+    // REPOSITORY + MODEL
+    // =====================================================
+
+    private val repository =
+        ClassNameRepository(application)
+
+    private val inferenceHelper =
+        TFLiteInferenceHelper(
+            application,
+            repository
+        )
+
+    // =====================================================
+    // SELECTED IMAGE
+    // =====================================================
+
+    private val _selectedBitmap =
+        MutableStateFlow<Bitmap?>(null)
+
+    val selectedBitmap:
+            StateFlow<Bitmap?> =
+        _selectedBitmap.asStateFlow()
+
+    // =====================================================
+    // DETECTION STATE
+    // =====================================================
+
+    private val _detectionState =
+        MutableStateFlow<DetectionState>(
+            DetectionState.ModelLoading
+        )
+
+    val detectionState:
+            StateFlow<DetectionState> =
+        _detectionState.asStateFlow()
+
+    // =====================================================
+    // INIT
+    // =====================================================
 
     init {
+
         loadModel()
     }
 
-    /** Loads the TFLite model asynchronously in a background thread */
+    // =====================================================
+    // LOAD MODEL
+    // =====================================================
+
     private fun loadModel() {
+
         viewModelScope.launch {
+
             try {
+
                 withContext(Dispatchers.IO) {
+
                     inferenceHelper.loadModel()
                 }
-                _detectionState.value = DetectionState.ModelReady
+
+                Log.d(
+                    TAG,
+                    "Model loaded successfully"
+                )
+
+                _detectionState.value =
+                    DetectionState.ModelReady
+
             } catch (e: Exception) {
-                Log.e(logTag, "Model load failed", e)
-                _detectionState.value = DetectionState.Error("Failed to load model: ${e.message}")
+
+                Log.e(
+                    TAG,
+                    "Model load failed",
+                    e
+                )
+
+                _detectionState.value =
+                    DetectionState.Error(
+                        "Failed to load model:\n${e.message}"
+                    )
             }
         }
     }
 
-    /**
-     * Called when user selects an image (from camera or gallery).
-     * Loads and compresses the bitmap for preview.
-     */
+    // =====================================================
+    // IMAGE SELECTION
+    // =====================================================
 
-    /**  // Old version without compression
+    fun onImageSelected(
+        uri: Uri
+    ) {
 
-    fun onImageSelected(uri: Uri) {
         viewModelScope.launch {
-            val bitmap = withContext(Dispatchers.IO) {
-                val raw = BitmapUtils.uriToBitmap(getApplication(), uri)
-                raw?.let { BitmapUtils.compressBitmap(it) }
-            }
-            if (bitmap != null) {
-                _selectedBitmap.value = bitmap
-                _detectionState.value = DetectionState.ModelReady
-            } else {
-                Log.e(logTag, "Bitmap decode failed for uri: $uri")
-                _detectionState.value = DetectionState.Error("Could not load image. Please try another.")
+
+            try {
+
+                val bitmap =
+                    withContext(Dispatchers.IO) {
+
+                        BitmapUtils.uriToBitmap(
+                            getApplication(),
+                            uri
+                        )
+                    }
+
+                if (bitmap != null) {
+
+                    _selectedBitmap.value =
+                        bitmap
+
+                    _detectionState.value =
+                        DetectionState.ModelReady
+
+                    Log.d(
+                        TAG,
+                        """
+                        Image loaded successfully
+                        Width  : ${bitmap.width}
+                        Height : ${bitmap.height}
+                        """.trimIndent()
+                    )
+
+                } else {
+
+                    Log.e(
+                        TAG,
+                        "Bitmap decode returned null"
+                    )
+
+                    _detectionState.value =
+                        DetectionState.Error(
+                            "Could not load image."
+                        )
+                }
+
+            } catch (e: Exception) {
+
+                Log.e(
+                    TAG,
+                    "Image selection failed",
+                    e
+                )
+
+                _detectionState.value =
+                    DetectionState.Error(
+                        "Failed to process image:\n${e.message}"
+                    )
             }
         }
     }
-    */
 
-    // Updated version with compression to reduce memory usage and speed up inference
-    fun onImageSelected(uri: Uri) {
+    // =====================================================
+    // DETECT DISEASE
+    // =====================================================
 
-    viewModelScope.launch {
+    fun detectDisease() {
 
-        val bitmap = withContext(Dispatchers.IO) {
+        val bitmap =
+            _selectedBitmap.value
+                ?: run {
 
-            BitmapUtils.uriToBitmap(
-                getApplication(),
-                uri
-            )
+                    _detectionState.value =
+                        DetectionState.Error(
+                            "No image selected."
+                        )
+
+                    return
+                }
+
+        viewModelScope.launch {
+
+            try {
+
+                _detectionState.value =
+                    DetectionState.Analyzing
+
+                val result =
+                    withContext(Dispatchers.Default) {
+
+                        inferenceHelper.classify(
+                            bitmap
+                        )
+                    }
+
+                Log.d(
+                    TAG,
+                    """
+                    Detection Success
+                    Crop       : ${result.cropName}
+                    Disease    : ${result.diseaseName}
+                    Confidence : ${(result.confidence * 100).toInt()}%
+                    """.trimIndent()
+                )
+
+                _detectionState.value =
+                    DetectionState.Success(
+                        result,
+                        bitmap
+                    )
+
+            } catch (e: Exception) {
+
+                Log.e(
+                    TAG,
+                    "Detection failed",
+                    e
+                )
+
+                _detectionState.value =
+                    DetectionState.Error(
+                        "Detection failed:\n${e.message}"
+                    )
+            }
         }
+    }
 
-        if (bitmap != null) {
+    // =====================================================
+    // RESET
+    // =====================================================
 
-            _selectedBitmap.value = bitmap
+    fun reset() {
+
+        _selectedBitmap.value = null
+
+        _detectionState.value =
+            DetectionState.ModelReady
+    }
+
+    // =====================================================
+    // CLEAR ERROR
+    // =====================================================
+
+    fun clearError() {
+
+        if (
+            _detectionState.value
+            is DetectionState.Error
+        ) {
 
             _detectionState.value =
                 DetectionState.ModelReady
-
-        } else {
-
-            Log.e(
-                logTag,
-                "Bitmap decode failed for uri: $uri"
-            )
-
-            _detectionState.value =
-                DetectionState.Error(
-                    "Could not load image. Please try another."
-                )
-        }
-    }
-}
-
-    /**
-     * Runs TFLite inference on the currently selected bitmap.
-     */
-    fun detectDisease() {
-        val bitmap = _selectedBitmap.value ?: return
-        viewModelScope.launch {
-            _detectionState.value = DetectionState.Analyzing
-            try {
-                val result = withContext(Dispatchers.Default) {
-                    inferenceHelper.classify(bitmap)
-                }
-                _detectionState.value = DetectionState.Success(result, bitmap)
-            } catch (e: Exception) {
-                Log.e(logTag, "Detection failed", e)
-                _detectionState.value = DetectionState.Error("Detection failed: ${e.message}")
-            }
         }
     }
 
-    /** Resets state so user can try another image */
-    fun reset() {
-        _selectedBitmap.value = null
-        _detectionState.value = DetectionState.ModelReady
-    }
-
-    /** Clears error state while keeping the current bitmap, if any */
-    fun clearError() {
-        if (_detectionState.value is DetectionState.Error) {
-            _detectionState.value = DetectionState.ModelReady
-        }
-    }
+    // =====================================================
+    // CLEANUP
+    // =====================================================
 
     override fun onCleared() {
+
         super.onCleared()
+
         inferenceHelper.close()
     }
 }

@@ -1,18 +1,30 @@
 package com.cropdoctor.app.data
 
 import android.content.Context
+import android.util.Log
 import org.json.JSONArray
 
 class ClassNameRepository(
     private val context: Context
 ) {
 
+    companion object {
+
+        private const val TAG =
+            "ClassNameRepository"
+    }
+
+    // =====================================================
+    // CLASS NAMES
+    // =====================================================
+
     val classNames: List<String> by lazy {
+
         loadClassNames()
     }
 
     // =====================================================
-    // LOAD LABELS
+    // LOAD JSON LABELS
     // =====================================================
 
     private fun loadClassNames(): List<String> {
@@ -21,67 +33,128 @@ class ClassNameRepository(
 
             val jsonString =
                 context.assets
-                    .open("class_names.json")
+                    .open("class_names_v7.json")
                     .bufferedReader()
                     .use { it.readText() }
 
-            val jsonArray = JSONArray(jsonString)
+            val jsonArray =
+                JSONArray(jsonString)
 
-            List(jsonArray.length()) { i ->
-                jsonArray.getString(i)
+            val labels =
+                List(jsonArray.length()) { index ->
+
+                    jsonArray.getString(index)
+                }
+
+            Log.d(
+                TAG,
+                "Loaded ${labels.size} class labels"
+            )
+
+            labels.forEachIndexed { index, label ->
+
+                Log.d(
+                    TAG,
+                    "$index -> $label"
+                )
             }
+
+            labels
 
         } catch (e: Exception) {
 
-            e.printStackTrace()
+            Log.e(
+                TAG,
+                "Failed to load class names",
+                e
+            )
 
             emptyList()
         }
     }
 
     // =====================================================
-    // FORMAT LABELS FOR UI
+    // FORMAT LABEL FOR UI
     // =====================================================
 
     fun formatLabel(
         raw: String
     ): Pair<String, String> {
 
-        val parts = raw.split("___")
+        return try {
 
-        val crop =
-            parts.getOrElse(0) { raw }
-                .replace("_", " ")
-                .replace("(maize)", "")
-                .trim()
+            val parts =
+                raw.split("___")
 
-        var disease =
-            parts.getOrElse(1) { "" }
-                .replace("_", " ")
-                .replace("  ", " ")
-                .trim()
+            // -------------------------------------------------
+            // CROP
+            // -------------------------------------------------
 
-        // Remove duplicate crop names
-        // Example:
-        // Apple -> Apple Scab
-        disease = disease.replace(
-            crop,
-            "",
-            ignoreCase = true
-        ).trim()
+            val crop =
+                parts.getOrElse(0) { raw }
+                    .replace("_", " ")
+                    .replace("(maize)", "")
+                    .trim()
+                    .split(" ")
+                    .joinToString(" ") {
 
-        // Capitalize properly
-        disease =
-            disease.split(" ")
-                .joinToString(" ") {
-                    it.replaceFirstChar { c ->
-                        c.uppercase()
+                        it.replaceFirstChar { char ->
+
+                            char.uppercase()
+                        }
                     }
-                }
 
-        return Pair(
-            crop,
-            disease.ifEmpty { "Healthy" }
-        )
+            // -------------------------------------------------
+            // DISEASE
+            // -------------------------------------------------
+
+            var disease =
+                parts.getOrElse(1) { "Healthy" }
+                    .replace("_", " ")
+                    .replace("  ", " ")
+                    .trim()
+
+            // Remove duplicated crop names
+            disease =
+                disease.replace(
+                    crop,
+                    "",
+                    ignoreCase = true
+                ).trim()
+
+            // Capitalize nicely
+            disease =
+                disease.split(" ")
+                    .joinToString(" ") {
+
+                        it.replaceFirstChar { char ->
+
+                            char.uppercase()
+                        }
+                    }
+
+            if (disease.isBlank()) {
+
+                disease = "Healthy"
+            }
+
+            Pair(
+                crop,
+                disease
+            )
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "Label formatting failed",
+                e
+            )
+
+            Pair(
+                "Unknown",
+                "Unknown"
+            )
+        }
     }
 }
